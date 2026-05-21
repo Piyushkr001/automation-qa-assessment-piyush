@@ -1,0 +1,461 @@
+{
+  "name": "Task2 - GitHub Automation QA Digest - Piyush Kumar",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "0d78ac56-b783-4d06-a2f9-01-schedule",
+      "name": "Schedule Trigger - Every 1 Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "n8n automation qa"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-automation-qa-assessment"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "3e18dcf8-0d1f-4567-a8a2-02-github-search",
+      "name": "HTTP - Search GitHub Repositories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -780,
+        0
+      ],
+      "continueOnFail": true,
+      "notes": "First API call: GitHub Search Repositories API. Continue On Fail is enabled so errors can be routed to the fallback notification path."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error-check-search",
+              "leftValue": "={{$json.error || !$json.items}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f48b8cd-6dd3-41f3-bd6f-03-if-search-failed",
+      "name": "IF - GitHub Search Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"content\": \"\u26a0\ufe0f GitHub Automation QA Digest failed at the first API call. Please check the n8n execution logs for the HTTP - Search GitHub Repositories node.\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a02d8ab4-095a-47e2-b9ea-04-error-discord-search",
+      "name": "Discord - Error Alert Search Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        -180
+      ],
+      "continueOnFail": true,
+      "notes": "Error handling branch. Uses DISCORD_WEBHOOK_URL from n8n environment instead of hard-coding the webhook secret."
+    },
+    {
+      "parameters": {
+        "jsCode": "const repos = $json.items || [];\n\nif (!Array.isArray(repos) || repos.length === 0) {\n  return [\n    {\n      json: {\n        error: true,\n        stage: \"transform\",\n        message: \"GitHub API returned no repositories.\"\n      }\n    }\n  ];\n}\n\nconst topRepos = repos\n  .filter((repo) => repo && repo.full_name && repo.owner && repo.name)\n  .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))\n  .slice(0, 5)\n  .map((repo, index) => ({\n    rank: index + 1,\n    name: repo.full_name,\n    owner: repo.owner.login,\n    repoName: repo.name,\n    url: repo.html_url,\n    description: repo.description || \"No description available\",\n    stars: repo.stargazers_count || 0,\n    forks: repo.forks_count || 0,\n    openIssues: repo.open_issues_count || 0,\n    language: repo.language || \"Not specified\",\n    updatedAt: repo.updated_at\n  }));\n\nconst topRepo = topRepos[0];\n\nconst digestLines = topRepos.map((repo) => {\n  return `${repo.rank}. ${repo.name} \u2014 \u2b50 ${repo.stars}, forks: ${repo.forks}, language: ${repo.language}\\n${repo.url}`;\n});\n\nreturn [\n  {\n    json: {\n      generatedAt: new Date().toISOString(),\n      threshold: 1000,\n      topRepo,\n      topRepos,\n      digestText: `\ud83d\ude80 GitHub Automation QA Digest\\n\\nTop repositories for query: n8n automation qa\\n\\n${digestLines.join(\"\\n\\n\")}`\n    }\n  }\n];"
+      },
+      "id": "7abcf5ea-fd46-4e45-a3af-05-code-top5",
+      "name": "Code - Sort and Keep Top 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        100
+      ],
+      "notes": "Transformation step: filters valid repository records, sorts by stars, keeps top 5, and creates a digest payload."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "transform-error-check",
+              "leftValue": "={{$json.error === true}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4bbb42f6-7f8f-4d42-bbdd-06-if-transform-failed",
+      "name": "IF - Transform Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"content\": \"\u26a0\ufe0f GitHub Automation QA Digest failed during transformation. Reason: {{$json.message}}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "91fdffbd-d6e6-48f4-9c19-07-error-transform",
+      "name": "Discord - Error Alert Transform Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        -80
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.topRepo.owner}}/{{$json.topRepo.repoName}}/readme",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-automation-qa-assessment"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "a81d04a8-0332-4d2f-9f2d-08-readme",
+      "name": "HTTP - Enrich Top Repo README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        180
+      ],
+      "continueOnFail": true,
+      "notes": "Second API call: fetches the README metadata for the top repository. Continue On Fail allows fallback handling if README is missing or API fails."
+    },
+    {
+      "parameters": {
+        "jsCode": "const previous = $(\"Code - Sort and Keep Top 5\").first().json;\nconst readmeResponse = $json;\n\nconst readmeFetched = !!(readmeResponse && readmeResponse.html_url);\nconst readmeUrl = readmeFetched\n  ? readmeResponse.html_url\n  : previous.topRepo.url;\n\nconst enrichmentNote = readmeFetched\n  ? `\\n\\n\ud83d\udcd8 README fetched successfully: ${readmeUrl}`\n  : `\\n\\n\u26a0\ufe0f README enrichment failed or README was not available. Fallback URL: ${previous.topRepo.url}`;\n\nconst priorityLabel = previous.topRepo.stars > previous.threshold\n  ? \"HIGH INTEREST\"\n  : \"NORMAL INTEREST\";\n\nreturn [\n  {\n    json: {\n      ...previous,\n      readmeFetched,\n      readmeUrl,\n      priorityLabel,\n      finalDigest: `${previous.digestText}${enrichmentNote}\\n\\nPriority: ${priorityLabel}\\nGenerated at: ${previous.generatedAt}`\n    }\n  }\n];"
+      },
+      "id": "8f5d7bd4-12ad-4edb-8c04-09-code-format",
+      "name": "Code - Format Final Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        180
+      ],
+      "notes": "Formats final digest and includes enrichment result. If the README call fails, the workflow still produces a fallback digest instead of failing silently."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "stars-threshold-check",
+              "leftValue": "={{$json.topRepo.stars}}",
+              "rightValue": 1000,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27ed1a6d-f81e-4958-ae94-10-if-stars",
+      "name": "IF - Top Repo Stars > 1000?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        180
+      ],
+      "notes": "Conditional branch based on a threshold. Top repository stars greater than 1000 are sent as high-priority digest."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"content\": \"\ud83d\udd25 HIGH INTEREST DIGEST\\n\\n{{$json.finalDigest}}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "bb0476c0-388f-4b9a-9e35-11-discord-high",
+      "name": "Discord - Send High Interest Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        80
+      ],
+      "continueOnFail": true,
+      "notes": "Success output branch for high-interest results. Uses DISCORD_WEBHOOK_URL environment variable."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"content\": \"\u2705 NORMAL DIGEST\\n\\n{{$json.finalDigest}}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "6d801f57-f109-4240-9ffb-12-discord-normal",
+      "name": "Discord - Send Normal Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "continueOnFail": true,
+      "notes": "Success output branch for normal-interest results. Uses DISCORD_WEBHOOK_URL environment variable."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger - Every 1 Hour": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Search GitHub Repositories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Search GitHub Repositories": {
+      "main": [
+        [
+          {
+            "node": "IF - GitHub Search Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - GitHub Search Failed?": {
+      "main": [
+        [
+          {
+            "node": "Discord - Error Alert Search Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Sort and Keep Top 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Sort and Keep Top 5": {
+      "main": [
+        [
+          {
+            "node": "IF - Transform Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Transform Failed?": {
+      "main": [
+        [
+          {
+            "node": "Discord - Error Alert Transform Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP - Enrich Top Repo README",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Enrich Top Repo README": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Final Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Final Digest": {
+      "main": [
+        [
+          {
+            "node": "IF - Top Repo Stars > 1000?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Top Repo Stars > 1000?": {
+      "main": [
+        [
+          {
+            "node": "Discord - Send High Interest Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord - Send Normal Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T00:00:00.000Z",
+      "id": "automation-qa-assessment",
+      "name": "Automation QA Assessment"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-05-21T00:00:00.000Z",
+  "versionId": "task2-piyush-kumar-v1"
+}
