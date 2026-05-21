@@ -1,0 +1,230 @@
+{
+  "name": "Bonus - Uptime Monitor - TaskPilot - Piyush Kumar",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000001",
+      "name": "Schedule Trigger - Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const targetUrl = 'https://taskpilot-swart.vercel.app/';\nconst responseTimeThresholdMs = 3000;\n\nreturn [\n  {\n    json: {\n      targetUrl,\n      responseTimeThresholdMs,\n      startedAtMs: Date.now(),\n      checkedAt: new Date().toISOString(),\n      monitorName: 'TaskPilot Production Uptime Monitor'\n    }\n  }\n];\n"
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000002",
+      "name": "Code - Prepare Monitor Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.targetUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-uptime-monitor-piyush"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000003",
+      "name": "HTTP - Ping TaskPilot App",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $node['Code - Prepare Monitor Check'].json;\n\nconst statusCode =\n  $json.statusCode ||\n  $json.response?.statusCode ||\n  $json.status ||\n  0;\n\nconst responseTimeMs = Date.now() - config.startedAtMs;\nconst isStatusHealthy = statusCode === 200;\nconst isResponseTimeHealthy = responseTimeMs <= config.responseTimeThresholdMs;\nconst isHealthy = isStatusHealthy && isResponseTimeHealthy;\n\nlet reason = 'OK';\nif (!isStatusHealthy) {\n  reason = `Unexpected HTTP status code: ${statusCode || 'No response'}`;\n} else if (!isResponseTimeHealthy) {\n  reason = `Slow response time: ${responseTimeMs}ms`;\n}\n\nreturn [\n  {\n    json: {\n      monitorName: config.monitorName,\n      targetUrl: config.targetUrl,\n      checkedAt: new Date().toISOString(),\n      statusCode,\n      responseTimeMs,\n      responseTimeThresholdMs: config.responseTimeThresholdMs,\n      isHealthy,\n      reason,\n      errorMessage: $json.error?.message || $json.message || null\n    }\n  }\n];\n"
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000004",
+      "name": "Code - Build Uptime Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "unhealthy-condition",
+              "leftValue": "={{$json.isHealthy}}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000005",
+      "name": "IF - App Unhealthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DISCORD_WEBHOOK_URL}}",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"content\": \"\ud83d\udea8 **Uptime Alert**\\n\\n**Monitor:** {{$json.monitorName}}\\n**URL:** {{$json.targetUrl}}\\n**Status Code:** {{$json.statusCode}}\\n**Response Time:** {{$json.responseTimeMs}}ms\\n**Reason:** {{$json.reason}}\\n**Checked At:** {{$json.checkedAt}}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000006",
+      "name": "Discord - Send Uptime Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        180
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      message: `Healthy check passed for ${$json.targetUrl}`,\n      statusCode: $json.statusCode,\n      responseTimeMs: $json.responseTimeMs,\n      checkedAt: $json.checkedAt\n    }\n  }\n];\n"
+      },
+      "id": "b1a0a6d5-90a2-4d5d-8c9c-000000000007",
+      "name": "Code - Healthy Execution Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        420
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger - Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Monitor Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Monitor Check": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Ping TaskPilot App",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Ping TaskPilot App": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Uptime Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Uptime Result": {
+      "main": [
+        [
+          {
+            "node": "IF - App Unhealthy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - App Unhealthy?": {
+      "main": [
+        [
+          {
+            "node": "Discord - Send Uptime Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Healthy Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "versionId": "bonus-uptime-monitor-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "description": "Bonus task uptime monitor for TaskPilot. Checks the app every 5 minutes, retries failed HTTP calls, tracks response time, and sends a Discord alert if status is not 200 or response time exceeds the threshold."
+  },
+  "id": "BonusUptimeMonitorPiyush",
+  "tags": []
+}
